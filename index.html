@@ -52,7 +52,7 @@ input,select{width:100%;padding:13px;border:2px solid #d5dae0;border-radius:11px
 .flatTools button{padding:11px;border:2px solid #d1d5db;background:#fff;border-radius:11px;font-weight:800}
 .flatTools button.primary{background:#20262e;color:#fff;border-color:#20262e}
 .flatCanvas{width:100%;background:#fff;border:2px solid #cfd5dc;border-radius:14px;touch-action:none}
-/* V67: Aufmaß-Skizze auf Smartphones wirklich fast über die komplette Displaybreite */
+/* V68: Aufmaß-Skizze auf Smartphones wirklich fast über die komplette Displaybreite */
 .flatCanvas{display:block;box-sizing:border-box}
 @media(max-width:700px){
   .flatCanvas{
@@ -533,6 +533,28 @@ select.chosenGreen{
 .gullyMeasureGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .gullyMeasureGrid input,.gullyMeasureGrid select{width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:8px}
 .gullyMeasureGrid label{font-size:12px;font-weight:800;color:#374151}
+
+
+#flatFullscreen.flatWorkspace{
+ position:fixed!important; inset:0!important; z-index:2147483647!important;
+ width:100vw!important; height:100dvh!important; margin:0!important; padding:0!important;
+ background:#fff!important; overflow:hidden!important;
+}
+#flatFullscreen.flatWorkspace #flatCanvas{
+ position:absolute!important; inset:0!important; width:100vw!important; height:100dvh!important;
+ max-width:none!important; max-height:none!important; margin:0!important; touch-action:none!important;
+}
+#flatWorkspaceTools{
+ display:none; position:absolute; z-index:20; top:8px; right:8px;
+ gap:6px; flex-direction:column; width:132px;
+}
+#flatFullscreen.flatWorkspace #flatWorkspaceTools{display:flex!important}
+#flatWorkspaceTools button{
+ padding:10px 7px;border:1px solid #cbd5e1;border-radius:10px;background:rgba(255,255,255,.94);
+ font-weight:800;font-size:13px;box-shadow:0 1px 4px rgba(0,0,0,.15)
+}
+#flatFullscreen.flatWorkspace .flatControls,
+#flatFullscreen.flatWorkspace .drainPanel{display:none!important}
 
 </style>
 </head>
@@ -3475,6 +3497,14 @@ function openFlatForm(kind){
    `<div class="flatDrawWrap">
       <div id="flatFullscreen">
 <svg id="flatCanvas" class="flatCanvas" viewBox="0 0 500 420" role="img" aria-label="Zeichenfläche für Flachdach-Grundriss"></svg>
+<div id="flatWorkspaceTools">
+ <button type="button" id="wsUndo">↶ Rückgängig</button>
+ <button type="button" id="wsDelete">⌫ Letzten Punkt löschen</button>
+ <button type="button" id="wsDrain">＋ Gully</button>
+ <button type="button" id="wsResetZoom">⌖ Zoom zurück</button>
+ <button type="button" id="wsClose">✕ Schließen</button>
+</div>
+
 <div class="flatControls" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
   <button type="button" id="flatFullBtn" class="btn">⛶ Skizze Vollbild</button>
   <button type="button" id="addDrainBtn" class="btn">＋ Entwässerungspunkt</button>
@@ -4620,29 +4650,26 @@ if('serviceWorker' in navigator){
 renderRecentProjects();
 
   const flatFullBtn=document.getElementById('flatFullBtn');
-  if(flatFullBtn)flatFullBtn.addEventListener('click',async(e)=>{
+  function openFlatWorkspace(){
+    const box=document.getElementById('flatFullscreen');
+    box.classList.add('flatWorkspace');
+    document.body.style.overflow='hidden';
+    setupFlatZoom();
+    flatFullBtn.textContent='✕ Vollbild schließen';
+    try{ if(screen.orientation?.lock) screen.orientation.lock('landscape'); }catch(e){}
+  }
+  function closeFlatWorkspace(){
+    const box=document.getElementById('flatFullscreen');
+    box.classList.remove('flatWorkspace');
+    document.body.style.overflow='';
+    flatFullBtn.textContent='⛶ Skizze Vollbild';
+    try{ if(screen.orientation?.unlock) screen.orientation.unlock(); }catch(e){}
+  }
+  if(flatFullBtn)flatFullBtn.addEventListener('click',(e)=>{
     e.preventDefault(); e.stopPropagation();
     const box=document.getElementById('flatFullscreen');
-    const isOpen=box.classList.contains('flatFsFallback') || !!document.fullscreenElement;
-    if(!isOpen){
-      // Sofort sichtbarer Vollbild-Fallback; native API ist nur Zusatz.
-      box.classList.add('flatFsFallback');
-      flatFullBtn.textContent='✕ Vollbild schließen';
-      setupFlatZoom();
-      try{ if(box.requestFullscreen) await box.requestFullscreen(); }catch(err){}
-      try{ if(screen.orientation?.lock) await screen.orientation.lock('landscape'); }catch(err){}
-    }else{
-      try{ if(document.fullscreenElement) await document.exitFullscreen(); }catch(err){}
-      box.classList.remove('flatFsFallback');
-      flatFullBtn.textContent='⛶ Skizze Vollbild';
-      try{ if(screen.orientation?.unlock) screen.orientation.unlock(); }catch(err){}
-    }
-  });
-  document.addEventListener('fullscreenchange',()=>{
-    const box=document.getElementById('flatFullscreen');
-    if(!document.fullscreenElement && box && !box.classList.contains('flatFsFallback')){
-      flatFullBtn.textContent='⛶ Skizze Vollbild';
-    }
+    if(box.classList.contains('flatWorkspace')) closeFlatWorkspace();
+    else openFlatWorkspace();
   });
 
   const preciseDrainBtn=document.getElementById('setPreciseDrainBtn');
@@ -4685,6 +4712,30 @@ renderRecentProjects();
     const before=flatDrains.length;
     setPreciseDrain();
     if(flatDrains.length>before)preciseDrainModal.style.display='none';
+  });
+
+
+  document.getElementById('wsClose')?.addEventListener('click',closeFlatWorkspace);
+  document.getElementById('wsResetZoom')?.addEventListener('click',resetFlatView);
+
+  document.getElementById('wsUndo')?.addEventListener('click',()=>{
+    if(flatClosed){
+      flatClosed=false;
+    }else if(flatPoints.length){
+      flatPoints.pop();
+    }
+    renderFlatShape();
+  });
+
+  document.getElementById('wsDelete')?.addEventListener('click',()=>{
+    if(flatClosed)flatClosed=false;
+    if(flatPoints.length)flatPoints.pop();
+    renderFlatShape();
+  });
+
+  document.getElementById('wsDrain')?.addEventListener('click',()=>{
+    const modal=document.getElementById('preciseDrainModal');
+    if(modal)modal.style.display='flex';
   });
 
 </script>
