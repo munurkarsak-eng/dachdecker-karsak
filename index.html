@@ -52,7 +52,7 @@ input,select{width:100%;padding:13px;border:2px solid #d5dae0;border-radius:11px
 .flatTools button{padding:11px;border:2px solid #d1d5db;background:#fff;border-radius:11px;font-weight:800}
 .flatTools button.primary{background:#20262e;color:#fff;border-color:#20262e}
 .flatCanvas{width:100%;background:#fff;border:2px solid #cfd5dc;border-radius:14px;touch-action:none}
-/* V66: Aufmaß-Skizze auf Smartphones wirklich fast über die komplette Displaybreite */
+/* V67: Aufmaß-Skizze auf Smartphones wirklich fast über die komplette Displaybreite */
 .flatCanvas{display:block;box-sizing:border-box}
 @media(max-width:700px){
   .flatCanvas{
@@ -3478,6 +3478,7 @@ function openFlatForm(kind){
 <div class="flatControls" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
   <button type="button" id="flatFullBtn" class="btn">⛶ Skizze Vollbild</button>
   <button type="button" id="addDrainBtn" class="btn">＋ Entwässerungspunkt</button>
+  <button type="button" id="openPreciseDrainBtn" class="btn">📐 Gully genau bemaßen</button>
 </div>
 <div class="drainPanel" id="drainPanel">
   <strong>Entwässerung</strong>
@@ -3864,6 +3865,54 @@ function drawFlatGrid(){
 
 
 let flatDrains=[];
+
+let flatView={x:0,y:0,w:500,h:420};
+let flatTouchState=null;
+
+function applyFlatView(){
+  const svg=document.getElementById('flatCanvas');
+  if(svg)svg.setAttribute('viewBox',`${flatView.x} ${flatView.y} ${flatView.w} ${flatView.h}`);
+}
+function resetFlatView(){ flatView={x:0,y:0,w:500,h:420}; applyFlatView(); }
+function setupFlatZoom(){
+  const svg=document.getElementById('flatCanvas');
+  if(!svg || svg.dataset.zoomReady)return;
+  svg.dataset.zoomReady='1';
+  applyFlatView();
+
+  svg.addEventListener('touchstart',e=>{
+    if(e.touches.length===2){
+      e.preventDefault();
+      const a=e.touches[0],b=e.touches[1];
+      flatTouchState={
+        dist:Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY),
+        cx:(a.clientX+b.clientX)/2, cy:(a.clientY+b.clientY)/2,
+        view:{...flatView}
+      };
+    }
+  },{passive:false});
+
+  svg.addEventListener('touchmove',e=>{
+    if(e.touches.length!==2 || !flatTouchState)return;
+    e.preventDefault();
+    const a=e.touches[0],b=e.touches[1];
+    const dist=Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY);
+    const cx=(a.clientX+b.clientX)/2, cy=(a.clientY+b.clientY)/2;
+    const scale=Math.max(.35,Math.min(3,flatTouchState.dist/dist));
+    const rect=svg.getBoundingClientRect();
+    const vw=flatTouchState.view.w*scale, vh=flatTouchState.view.h*scale;
+    const dx=(cx-flatTouchState.cx)/rect.width*flatTouchState.view.w;
+    const dy=(cy-flatTouchState.cy)/rect.height*flatTouchState.view.h;
+    flatView={
+      x:flatTouchState.view.x+(flatTouchState.view.w-vw)/2-dx,
+      y:flatTouchState.view.y+(flatTouchState.view.h-vh)/2-dy,
+      w:vw,h:vh
+    };
+    applyFlatView();
+  },{passive:false});
+  svg.addEventListener('touchend',e=>{ if(e.touches.length<2)flatTouchState=null; });
+}
+
 let pendingDrainType=null;
 
 function flatSvgPoint(evt){
@@ -4571,29 +4620,28 @@ if('serviceWorker' in navigator){
 renderRecentProjects();
 
   const flatFullBtn=document.getElementById('flatFullBtn');
-  if(flatFullBtn)flatFullBtn.addEventListener('click',async()=>{
+  if(flatFullBtn)flatFullBtn.addEventListener('click',async(e)=>{
+    e.preventDefault(); e.stopPropagation();
     const box=document.getElementById('flatFullscreen');
-    const entering=!document.fullscreenElement && !box.classList.contains('flatFsFallback');
-    if(entering){
-      let nativeOk=false;
-      try{
-        if(box.requestFullscreen){ await box.requestFullscreen(); nativeOk=true; }
-      }catch(e){}
-      if(!nativeOk)box.classList.add('flatFsFallback');
-      try{ if(screen.orientation?.lock) await screen.orientation.lock('landscape'); }catch(e){}
+    const isOpen=box.classList.contains('flatFsFallback') || !!document.fullscreenElement;
+    if(!isOpen){
+      // Sofort sichtbarer Vollbild-Fallback; native API ist nur Zusatz.
+      box.classList.add('flatFsFallback');
       flatFullBtn.textContent='✕ Vollbild schließen';
+      setupFlatZoom();
+      try{ if(box.requestFullscreen) await box.requestFullscreen(); }catch(err){}
+      try{ if(screen.orientation?.lock) await screen.orientation.lock('landscape'); }catch(err){}
     }else{
-      try{ if(document.fullscreenElement) await document.exitFullscreen(); }catch(e){}
+      try{ if(document.fullscreenElement) await document.exitFullscreen(); }catch(err){}
       box.classList.remove('flatFsFallback');
-      try{ if(screen.orientation?.unlock) screen.orientation.unlock(); }catch(e){}
       flatFullBtn.textContent='⛶ Skizze Vollbild';
+      try{ if(screen.orientation?.unlock) screen.orientation.unlock(); }catch(err){}
     }
   });
-
   document.addEventListener('fullscreenchange',()=>{
     const box=document.getElementById('flatFullscreen');
-    if(!document.fullscreenElement && !box.classList.contains('flatFsFallback')){
-      if(flatFullBtn)flatFullBtn.textContent='⛶ Skizze Vollbild';
+    if(!document.fullscreenElement && box && !box.classList.contains('flatFsFallback')){
+      flatFullBtn.textContent='⛶ Skizze Vollbild';
     }
   });
 
@@ -4618,4 +4666,42 @@ renderRecentProjects();
     renderFlatDrains();
   }, true);
 
-</script></body></html>
+
+  setupFlatZoom();
+
+  const openPreciseDrainBtn=document.getElementById('openPreciseDrainBtn');
+  const preciseDrainModal=document.getElementById('preciseDrainModal');
+  if(openPreciseDrainBtn)openPreciseDrainBtn.addEventListener('click',()=>{
+    preciseDrainModal.style.display='flex';
+  });
+  document.getElementById('modalDrainCancel')?.addEventListener('click',()=>{
+    preciseDrainModal.style.display='none';
+  });
+  document.getElementById('modalDrainSet')?.addEventListener('click',()=>{
+    document.getElementById('preciseDrainType').value=document.getElementById('modalDrainType').value;
+    document.getElementById('preciseDrainCorner').value=document.getElementById('modalDrainCorner').value;
+    document.getElementById('preciseDrainX').value=document.getElementById('modalDrainX').value;
+    document.getElementById('preciseDrainY').value=document.getElementById('modalDrainY').value;
+    const before=flatDrains.length;
+    setPreciseDrain();
+    if(flatDrains.length>before)preciseDrainModal.style.display='none';
+  });
+
+</script>
+<div id="preciseDrainModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.55);padding:16px;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:14px;padding:16px;width:min(520px,100%);max-height:90vh;overflow:auto">
+    <h3 style="margin-top:0">Gully genau bemaßen</h3>
+    <div class="gullyMeasureGrid">
+      <label>Typ<select id="modalDrainType"><option value="roof">Flächengully</option><option value="attika">Attikagully</option><option value="emergency">Notentwässerung</option></select></label>
+      <label>Bezugspunkt<select id="modalDrainCorner"><option value="tl">links / oben</option><option value="tr">rechts / oben</option><option value="bl">links / unten</option><option value="br">rechts / unten</option></select></label>
+      <label>Waagerecht (m)<input id="modalDrainX" type="number" min="0" step="0.01" placeholder="z.B. 3,25"></label>
+      <label>Senkrecht (m)<input id="modalDrainY" type="number" min="0" step="0.01" placeholder="z.B. 4,80"></label>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button type="button" id="modalDrainSet" class="btn">Gully einsetzen</button>
+      <button type="button" id="modalDrainCancel" class="btn">Abbrechen</button>
+    </div>
+  </div>
+</div>
+
+</body></html>
