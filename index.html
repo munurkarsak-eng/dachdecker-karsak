@@ -52,7 +52,7 @@ input,select{width:100%;padding:13px;border:2px solid #d5dae0;border-radius:11px
 .flatTools button{padding:11px;border:2px solid #d1d5db;background:#fff;border-radius:11px;font-weight:800}
 .flatTools button.primary{background:#20262e;color:#fff;border-color:#20262e}
 .flatCanvas{width:100%;background:#fff;border:2px solid #cfd5dc;border-radius:14px;touch-action:none}
-/* V62: Aufmaß-Skizze auf Smartphones wirklich fast über die komplette Displaybreite */
+/* V63: Aufmaß-Skizze auf Smartphones wirklich fast über die komplette Displaybreite */
 .flatCanvas{display:block;box-sizing:border-box}
 @media(max-width:700px){
   .flatCanvas{
@@ -3720,6 +3720,19 @@ function initFlatDrawer(){
     const x=Math.round(p.x/snap)*snap;
     const y=Math.round(p.y/snap)*snap;
     if(x<25||x>475||y<25||y>395)return;
+
+    // Tippt der Nutzer zum Schließen wieder auf P1, wird KEIN neuer Punkt
+    // angelegt. Dadurch entsteht kein doppelter Endpunkt (z. B. P13)
+    // und keine künstliche 0,00-m-Kante.
+    if(flatPoints.length>=3){
+      const first=flatPoints[0];
+      if(first[0]===x && first[1]===y){
+        flatClosed=true;
+        renderFlatShape();
+        return;
+      }
+    }
+
     flatPoints.push([x,y]);
     renderFlatShape();
   });
@@ -3732,6 +3745,13 @@ function initFlatDrawer(){
     flatPoints=[]; flatClosed=false; flatObjects=[]; flatObjectTool=null; renderFlatShape();
   });
   close.addEventListener('click',()=>{
+    // Falls der letzte Punkt versehentlich exakt auf P1 gesetzt wurde,
+    // ist er nur ein doppelter Schließpunkt und keine echte Ecke.
+    // Vor dem Schließen entfernen, damit kein zusätzliches P/K entsteht.
+    if(flatPoints.length>=2){
+      const first=flatPoints[0], last=flatPoints[flatPoints.length-1];
+      if(first[0]===last[0] && first[1]===last[1]) flatPoints.pop();
+    }
     if(flatPoints.length<3){alert('Mindestens 3 Eckpunkte setzen.');return;}
     flatClosed=true; renderFlatShape();
   });
