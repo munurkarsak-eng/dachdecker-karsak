@@ -52,7 +52,7 @@ input,select{width:100%;padding:13px;border:2px solid #d5dae0;border-radius:11px
 .flatTools button{padding:11px;border:2px solid #d1d5db;background:#fff;border-radius:11px;font-weight:800}
 .flatTools button.primary{background:#20262e;color:#fff;border-color:#20262e}
 .flatCanvas{width:100%;background:#fff;border:2px solid #cfd5dc;border-radius:14px;touch-action:none}
-/* V63: Aufmaß-Skizze auf Smartphones wirklich fast über die komplette Displaybreite */
+/* V64: Aufmaß-Skizze auf Smartphones wirklich fast über die komplette Displaybreite */
 .flatCanvas{display:block;box-sizing:border-box}
 @media(max-width:700px){
   .flatCanvas{
@@ -75,6 +75,9 @@ input,select{width:100%;padding:13px;border:2px solid #d5dae0;border-radius:11px
 .edgeRow{display:grid;grid-template-columns:110px 1fr 34px;gap:8px;align-items:center}
 .edgeLabel{font-weight:700;font-size:13px}
 .edgeInput{padding:11px;border:2px solid #d5dae0;border-radius:10px;font-size:16px;width:100%}
+.edgeInput.edgeAuto{border-color:#16a34a;background:#ecfdf3;font-weight:800}
+.edgeRow.edgeAutoRow .edgeLabel{color:#15803d}
+.edgeAutoNote{grid-column:2 / 4;font-size:11px;color:#15803d;font-weight:700;margin-top:-5px}
 .edgeHint{font-size:12px;color:#6b7280;line-height:1.4;margin-top:8px}
 .edgeActive{stroke:var(--viz-accent,#111827)!important;stroke-width:6!important}
 @media(max-width:410px){.edgeRow{grid-template-columns:95px 1fr 30px}}
@@ -3852,6 +3855,83 @@ function renderObjectList(){
    btn.addEventListener('click',()=>{flatObjects.splice(parseInt(btn.dataset.obj),1);renderFlatShape();});
  });
 }
+function flatEdgeGeom(i){
+  const n=flatPoints.length;
+  const j=(i+1)%n;
+  const a=flatPoints[i], b=flatPoints[j];
+  const dx=b[0]-a[0], dy=b[1]-a[1];
+  const len=Math.hypot(dx,dy);
+  return {i,j,a,b,dx,dy,len,mx:(a[0]+b[0])/2,my:(a[1]+b[1])/2};
+}
+
+function flatEdgesAreAdjacent(i,k){
+  const n=flatPoints.length;
+  return i===k || (i+1)%n===k || (k+1)%n===i;
+}
+
+function flatBestMatchingEdge(i){
+  if(!flatClosed || flatPoints.length<4)return null;
+  const e=flatEdgeGeom(i);
+  if(e.len<1)return null;
+
+  let best=null, bestScore=Infinity;
+  for(let k=0;k<flatPoints.length;k++){
+    if(flatEdgesAreAdjacent(i,k))continue;
+    const c=flatEdgeGeom(k);
+    if(c.len<1)continue;
+
+    // Parallelität unabhängig von der Laufrichtung.
+    const cross=Math.abs(e.dx*c.dy-e.dy*c.dx)/(e.len*c.len);
+    if(cross>0.08)continue; // ca. 4,6 Grad Toleranz
+
+    // In der Skizze ungefähr gleiche gezeichnete Länge.
+    const lenDiff=Math.abs(e.len-c.len)/Math.max(e.len,c.len);
+    if(lenDiff>0.10)continue; // max. 10 %
+
+    const centerDist=Math.hypot(e.mx-c.mx,e.my-c.my);
+    if(centerDist<25)continue;
+
+    const score=lenDiff*1000 - centerDist*0.01;
+    if(score<bestScore){
+      bestScore=score;
+      best=k;
+    }
+  }
+  return best;
+}
+
+function applySmartOppositeMeasure(sourceIndex){
+  const source=document.querySelector(`.edgeInput[data-edge="${sourceIndex}"]`);
+  if(!source)return;
+  const raw=String(source.value||'').trim();
+  const value=parseFloat(raw.replace(',','.'));
+  if(!Number.isFinite(value) || value<=0)return;
+
+  const targetIndex=flatBestMatchingEdge(sourceIndex);
+  if(targetIndex===null)return;
+  const target=document.querySelector(`.edgeInput[data-edge="${targetIndex}"]`);
+  if(!target)return;
+
+  const origin=target.dataset.origin||'estimate';
+  // Ein vom Nutzer selbst eingegebenes Maß niemals überschreiben.
+  if(origin==='manual')return;
+
+  target.value=source.value;
+  target.dataset.origin='auto';
+  target.dataset.autoFrom=String(sourceIndex);
+  target.classList.add('edgeAuto');
+  const row=target.closest('.edgeRow');
+  if(row)row.classList.add('edgeAutoRow');
+
+  let note=row ? row.querySelector('.edgeAutoNote') : null;
+  if(row && !note){
+    note=document.createElement('div');
+    note.className='edgeAutoNote';
+    row.appendChild(note);
+  }
+  if(note)note.textContent=`Automatisch von K${sourceIndex+1} übernommen – antippen zum Ändern.`;
+}
+
 function renderEdgeInputs(){
   const box=document.getElementById('edgeMeasures');
   if(!box)return;
@@ -3861,9 +3941,15 @@ function renderEdgeInputs(){
     return;
   }
 
-  // Preserve already entered values across redraws.
+  // Werte + Herkunft über Neuzeichnen hinweg erhalten.
   const old={};
-  box.querySelectorAll('.edgeInput').forEach(inp=>old[inp.dataset.edge]=inp.value);
+  box.querySelectorAll('.edgeInput').forEach(inp=>{
+    old[inp.dataset.edge]={
+      value:inp.value,
+      origin:inp.dataset.origin||'estimate',
+      autoFrom:inp.dataset.autoFrom||''
+    };
+  });
 
   let html='<h3>Kantenmaße eingeben</h3><div class="edgeGrid">';
   for(let i=0;i<flatPoints.length;i++){
@@ -3875,15 +3961,25 @@ function renderEdgeInputs(){
     if(unit==='cm') gv=gv/100;
     const estimate=(px/25)*gv;
     const displayEstimate=unit==='cm' ? estimate*100 : estimate;
-    const val=old[i]!==undefined?old[i]:displayEstimate.toFixed(unit==='cm'?0:2);
 
-    html+=`<div class="edgeRow">
+    const prev=old[i];
+    const val=prev ? prev.value : displayEstimate.toFixed(unit==='cm'?0:2);
+    const origin=prev ? prev.origin : 'estimate';
+    const autoFrom=prev ? prev.autoFrom : '';
+    const autoClass=origin==='auto'?' edgeAuto':'';
+    const rowClass=origin==='auto'?' edgeAutoRow':'';
+    const autoNote=origin==='auto'
+      ? `<div class="edgeAutoNote">Automatisch von K${parseInt(autoFrom,10)+1} übernommen – antippen zum Ändern.</div>`
+      : '';
+
+    html+=`<div class="edgeRow${rowClass}">
       <div class="edgeLabel">K${i+1}: P${i+1} → P${j+1}</div>
-      <input class="edgeInput" data-edge="${i}" type="number" step="any" value="${val}" aria-label="Länge Kante ${i+1}">
+      <input class="edgeInput${autoClass}" data-edge="${i}" data-origin="${origin}" data-auto-from="${autoFrom}" type="number" step="any" value="${val}" aria-label="Länge Kante ${i+1}">
       <div class="lenU">${unit}</div>
+      ${autoNote}
     </div>`;
   }
-  html+='</div><div class="edgeHint">Trage hier die echten Aufmaßlängen ein. Die Richtung jeder Kante kommt aus deiner Zeichnung. Bei einer sauber geschlossenen U-, L- oder Polygonform sollten die Maße geometrisch wieder zusammenpassen.</div>';
+  html+='</div><div class="edgeHint">Smart-Maße: Wenn zwei nicht benachbarte Kanten in der Zeichnung parallel und nahezu gleich lang sind, übernimmt die App dein eingegebenes Maß automatisch auf die passende Gegenkante. Automatische Werte werden grün markiert und können jederzeit geändert werden.</div>';
   box.innerHTML=html;
 
   box.querySelectorAll('.edgeInput').forEach(inp=>{
@@ -3892,6 +3988,21 @@ function renderEdgeInputs(){
       const line=document.getElementById('edgeSvg'+inp.dataset.edge);
       if(line)line.classList.add('edgeActive');
     });
+
+    inp.addEventListener('input',()=>{
+      // Sobald der Nutzer dieses Feld selbst verändert, ist es ein manuelles Maß.
+      inp.dataset.origin='manual';
+      inp.dataset.autoFrom='';
+      inp.classList.remove('edgeAuto');
+      const row=inp.closest('.edgeRow');
+      if(row){
+        row.classList.remove('edgeAutoRow');
+        const note=row.querySelector('.edgeAutoNote');
+        if(note)note.remove();
+      }
+      applySmartOppositeMeasure(parseInt(inp.dataset.edge,10));
+    });
+
     inp.addEventListener('blur',()=>{
       const line=document.getElementById('edgeSvg'+inp.dataset.edge);
       if(line)line.classList.remove('edgeActive');
