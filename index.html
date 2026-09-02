@@ -52,7 +52,7 @@ input,select{width:100%;padding:13px;border:2px solid #d5dae0;border-radius:11px
 .flatTools button{padding:11px;border:2px solid #d1d5db;background:#fff;border-radius:11px;font-weight:800}
 .flatTools button.primary{background:#20262e;color:#fff;border-color:#20262e}
 .flatCanvas{width:100%;background:#fff;border:2px solid #cfd5dc;border-radius:14px;touch-action:none}
-/* V64: Aufmaß-Skizze auf Smartphones wirklich fast über die komplette Displaybreite */
+/* V65: Aufmaß-Skizze auf Smartphones wirklich fast über die komplette Displaybreite */
 .flatCanvas{display:block;box-sizing:border-box}
 @media(max-width:700px){
   .flatCanvas{
@@ -76,6 +76,21 @@ input,select{width:100%;padding:13px;border:2px solid #d5dae0;border-radius:11px
 .edgeLabel{font-weight:700;font-size:13px}
 .edgeInput{padding:11px;border:2px solid #d5dae0;border-radius:10px;font-size:16px;width:100%}
 .edgeInput.edgeAuto{border-color:#16a34a;background:#ecfdf3;font-weight:800}
+
+.edgeMeasureText{font-size:13px;font-weight:900;paint-order:stroke;stroke:#fff;stroke-width:4px;stroke-linejoin:round}
+.edgeMeasureManual{fill:#dc2626}
+.edgeMeasureSuggested{fill:#16a34a}
+.drainMarker{cursor:pointer}
+.drainMarker circle{stroke:#fff;stroke-width:2}
+.drainMarker text{font-size:12px;font-weight:900;fill:#111827;paint-order:stroke;stroke:#fff;stroke-width:3px}
+#flatFullscreen:fullscreen{background:#fff;padding:8px;overflow:auto}
+#flatFullscreen:fullscreen #flatCanvas{width:100vw!important;height:calc(100vh - 135px)!important;max-width:none!important}
+#flatFullscreen:fullscreen .flatControls{position:sticky;bottom:0;background:#fff;padding:8px 0}
+.drainPanel{margin-top:12px;padding:12px;border:1px solid #d8dde3;border-radius:12px;background:#f8fafc}
+.drainGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.drainGrid label{font-size:12px;font-weight:800;color:#374151}
+.drainGrid input,.drainGrid select{width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:8px;background:#fff}
+.drainHint{font-size:12px;color:#64748b;margin-top:8px;line-height:1.35}
 .edgeRow.edgeAutoRow .edgeLabel{color:#15803d}
 .edgeAutoNote{grid-column:2 / 4;font-size:11px;color:#15803d;font-weight:700;margin-top:-5px}
 .edgeHint{font-size:12px;color:#6b7280;line-height:1.4;margin-top:8px}
@@ -3433,7 +3448,23 @@ function openFlatForm(kind){
    x=help('Eckpunkte nacheinander antippen. Nach dem Schließen bekommt jede Kante ein eigenes Maßfeld.')+
    cf('gridSize','Rastermaß je Kästchen')+
    `<div class="flatDrawWrap">
-      <svg id="flatCanvas" class="flatCanvas" viewBox="0 0 500 420" role="img" aria-label="Zeichenfläche für Flachdach-Grundriss"></svg>
+      <div id="flatFullscreen">
+<svg id="flatCanvas" class="flatCanvas" viewBox="0 0 500 420" role="img" aria-label="Zeichenfläche für Flachdach-Grundriss"></svg>
+<div class="flatControls" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+  <button type="button" id="flatFullBtn" class="btn">⛶ Skizze Vollbild</button>
+  <button type="button" id="addDrainBtn" class="btn">＋ Entwässerungspunkt</button>
+</div>
+<div class="drainPanel" id="drainPanel">
+  <strong>Entwässerung</strong>
+  <div class="drainGrid">
+    <label>Flächengully<input id="drainRoofCount" type="number" min="0" value="0"></label>
+    <label>Attikagully<input id="drainAttikaCount" type="number" min="0" value="0"></label>
+    <label>Notentwässerung<input id="drainEmergencyCount" type="number" min="0" value="0"></label>
+    <label>Berechnungsfläche m²<input id="drainArea" type="number" min="0" step="0.01" placeholder="optional"></label>
+  </div>
+  <div class="drainHint">Die Anzahl kann vorgegeben werden. Mit „Entwässerungspunkt“ setzt du die Punkte anschließend direkt in die Dachfläche. Typ auswählen, dann auf die gewünschte Stelle in der Skizze tippen.</div>
+</div>
+</div>
       <div class="flatTools">
         <button type="button" id="undoPoint">↶ Letzten Punkt</button>
         <button type="button" id="clearPoints">✕ Löschen</button>
@@ -3781,6 +3812,80 @@ function drawFlatGrid(){
   svg.innerHTML=`<rect x="25" y="25" width="450" height="370" fill="white" stroke="#cbd5e1" stroke-width="1"/>${grid}<g id="flatShapeLayer"></g>`;
 }
 
+
+let flatDrains=[];
+let pendingDrainType=null;
+
+function flatSvgPoint(evt){
+  const svg=document.getElementById('flatCanvas');
+  const pt=svg.createSVGPoint();
+  pt.x=evt.clientX; pt.y=evt.clientY;
+  const p=pt.matrixTransform(svg.getScreenCTM().inverse());
+  return {x:p.x,y:p.y};
+}
+
+function drainTypeLabel(t){
+  return t==='roof'?'FG':(t==='attika'?'AG':'NE');
+}
+
+function renderFlatDrains(){
+  const svg=document.getElementById('flatCanvas');
+  if(!svg)return;
+  svg.querySelectorAll('.drainMarker').forEach(n=>n.remove());
+  flatDrains.forEach((d,i)=>{
+    const ns='http://www.w3.org/2000/svg';
+    const g=document.createElementNS(ns,'g');
+    g.setAttribute('class','drainMarker');
+    g.setAttribute('data-drain',i);
+    const c=document.createElementNS(ns,'circle');
+    c.setAttribute('cx',d.x); c.setAttribute('cy',d.y); c.setAttribute('r',10);
+    c.setAttribute('fill',d.type==='emergency'?'#f59e0b':(d.type==='attika'?'#2563eb':'#06b6d4'));
+    const t=document.createElementNS(ns,'text');
+    t.setAttribute('x',d.x+13); t.setAttribute('y',d.y+4);
+    t.textContent=drainTypeLabel(d.type)+(i+1);
+    g.appendChild(c); g.appendChild(t);
+    g.addEventListener('click',ev=>{
+      ev.stopPropagation();
+      if(confirm('Entwässerungspunkt entfernen?')){
+        flatDrains.splice(i,1); renderFlatDrains();
+      }
+    });
+    svg.appendChild(g);
+  });
+}
+
+function updateDrainCounters(){
+  const counts={roof:0,attika:0,emergency:0};
+  flatDrains.forEach(d=>counts[d.type]++);
+  const map={roof:'drainRoofCount',attika:'drainAttikaCount',emergency:'drainEmergencyCount'};
+  Object.keys(map).forEach(k=>{
+    const el=document.getElementById(map[k]);
+    if(el && counts[k]>Number(el.value||0))el.value=counts[k];
+  });
+}
+
+function drawEdgeMeasureLabels(){
+  const svg=document.getElementById('flatCanvas');
+  if(!svg || !flatClosed)return;
+  svg.querySelectorAll('.edgeMeasureText').forEach(n=>n.remove());
+  const ns='http://www.w3.org/2000/svg';
+  document.querySelectorAll('.edgeInput').forEach(inp=>{
+    const i=Number(inp.dataset.edge);
+    if(!Number.isInteger(i) || i<0 || i>=flatPoints.length)return;
+    const a=flatPoints[i], b=flatPoints[(i+1)%flatPoints.length];
+    const val=String(inp.value||'').trim();
+    if(!val)return;
+    const tx=document.createElementNS(ns,'text');
+    tx.setAttribute('x',(a[0]+b[0])/2);
+    tx.setAttribute('y',(a[1]+b[1])/2-7);
+    tx.setAttribute('text-anchor','middle');
+    const auto=inp.dataset.origin==='auto';
+    tx.setAttribute('class','edgeMeasureText '+(auto?'edgeMeasureSuggested':'edgeMeasureManual'));
+    tx.textContent=auto ? '? '+val+' '+unit : val+' '+unit;
+    svg.appendChild(tx);
+  });
+}
+
 function renderFlatShape(){
   drawFlatGrid();
   const layer=document.getElementById('flatShapeLayer');
@@ -3854,6 +3959,8 @@ function renderObjectList(){
  box.querySelectorAll('.removeObj').forEach(btn=>{
    btn.addEventListener('click',()=>{flatObjects.splice(parseInt(btn.dataset.obj),1);renderFlatShape();});
  });
+  drawEdgeMeasureLabels();
+  renderFlatDrains();
 }
 function flatEdgeGeom(i){
   const n=flatPoints.length;
@@ -3930,6 +4037,7 @@ function applySmartOppositeMeasure(sourceIndex){
     row.appendChild(note);
   }
   if(note)note.textContent=`Automatisch von K${sourceIndex+1} übernommen – antippen zum Ändern.`;
+  drawEdgeMeasureLabels();
 }
 
 function renderEdgeInputs(){
@@ -4001,6 +4109,7 @@ function renderEdgeInputs(){
         if(note)note.remove();
       }
       applySmartOppositeMeasure(parseInt(inp.dataset.edge,10));
+      drawEdgeMeasureLabels();
     });
 
     inp.addEventListener('blur',()=>{
@@ -4367,4 +4476,32 @@ if('serviceWorker' in navigator){
 }
 
 renderRecentProjects();
+
+  const flatFullBtn=document.getElementById('flatFullBtn');
+  if(flatFullBtn)flatFullBtn.addEventListener('click',async()=>{
+    const box=document.getElementById('flatFullscreen');
+    try{
+      if(!document.fullscreenElement) await box.requestFullscreen();
+      else await document.exitFullscreen();
+    }catch(e){ alert('Vollbild konnte auf diesem Gerät nicht geöffnet werden.'); }
+  });
+
+  const addDrainBtn=document.getElementById('addDrainBtn');
+  if(addDrainBtn)addDrainBtn.addEventListener('click',()=>{
+    const choice=prompt('Entwässerung wählen:\\n1 = Flächengully\\n2 = Attikagully\\n3 = Notentwässerung');
+    pendingDrainType=choice==='1'?'roof':(choice==='2'?'attika':(choice==='3'?'emergency':null));
+    if(pendingDrainType)alert('Jetzt die Position direkt in der Skizze antippen.');
+  });
+
+  const flatSvg=document.getElementById('flatCanvas');
+  if(flatSvg)flatSvg.addEventListener('click',evt=>{
+    if(!pendingDrainType)return;
+    evt.preventDefault(); evt.stopPropagation();
+    const p=flatSvgPoint(evt);
+    flatDrains.push({type:pendingDrainType,x:p.x,y:p.y});
+    pendingDrainType=null;
+    updateDrainCounters();
+    renderFlatDrains();
+  }, true);
+
 </script></body></html>
