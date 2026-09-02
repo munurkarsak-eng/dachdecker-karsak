@@ -52,7 +52,7 @@ input,select{width:100%;padding:13px;border:2px solid #d5dae0;border-radius:11px
 .flatTools button{padding:11px;border:2px solid #d1d5db;background:#fff;border-radius:11px;font-weight:800}
 .flatTools button.primary{background:#20262e;color:#fff;border-color:#20262e}
 .flatCanvas{width:100%;background:#fff;border:2px solid #cfd5dc;border-radius:14px;touch-action:none}
-/* V65: Aufmaß-Skizze auf Smartphones wirklich fast über die komplette Displaybreite */
+/* V66: Aufmaß-Skizze auf Smartphones wirklich fast über die komplette Displaybreite */
 .flatCanvas{display:block;box-sizing:border-box}
 @media(max-width:700px){
   .flatCanvas{
@@ -508,6 +508,31 @@ select.chosenGreen{
 .v60VoiceState.listening{background:#dcfce7;color:#166534}
 .v60VoiceBtn{width:100%;padding:14px;border:0;border-radius:12px;background:#20262e;color:#fff;font-weight:900;font-size:16px}
 .v60VoiceExamples{font-size:12px;line-height:1.55;background:#f8fafc;border-radius:10px;padding:10px;margin-top:9px}
+
+
+#flatFullscreen.flatFsFallback{
+  position:fixed!important; inset:0!important; z-index:99999!important;
+  background:#fff!important; width:100vw!important; height:100dvh!important;
+  padding:0!important; margin:0!important; overflow:hidden!important;
+}
+#flatFullscreen.flatFsFallback #flatCanvas,
+#flatFullscreen:fullscreen #flatCanvas{
+  display:block!important; width:100vw!important; height:100dvh!important;
+  max-width:none!important; max-height:none!important; margin:0!important;
+  touch-action:none;
+}
+#flatFullscreen.flatFsFallback .flatControls,
+#flatFullscreen:fullscreen .flatControls{
+  position:absolute!important; left:8px!important; right:8px!important; bottom:8px!important;
+  z-index:5!important; background:rgba(255,255,255,.92)!important;
+  border-radius:12px!important; padding:6px!important; margin:0!important;
+}
+#flatFullscreen.flatFsFallback .drainPanel,
+#flatFullscreen:fullscreen .drainPanel{display:none!important}
+.gullyMeasureBox{margin-top:10px;padding:10px;border:1px solid #cbd5e1;border-radius:10px;background:#fff}
+.gullyMeasureGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.gullyMeasureGrid input,.gullyMeasureGrid select{width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:8px}
+.gullyMeasureGrid label{font-size:12px;font-weight:800;color:#374151}
 
 </style>
 </head>
@@ -3462,7 +3487,32 @@ function openFlatForm(kind){
     <label>Notentwässerung<input id="drainEmergencyCount" type="number" min="0" value="0"></label>
     <label>Berechnungsfläche m²<input id="drainArea" type="number" min="0" step="0.01" placeholder="optional"></label>
   </div>
-  <div class="drainHint">Die Anzahl kann vorgegeben werden. Mit „Entwässerungspunkt“ setzt du die Punkte anschließend direkt in die Dachfläche. Typ auswählen, dann auf die gewünschte Stelle in der Skizze tippen.</div>
+  
+<div class="gullyMeasureBox">
+  <strong>Gully maßgenau setzen</strong>
+  <div class="gullyMeasureGrid">
+    <label>Typ
+      <select id="preciseDrainType">
+        <option value="roof">Flächengully</option>
+        <option value="attika">Attikagully</option>
+        <option value="emergency">Notentwässerung</option>
+      </select>
+    </label>
+    <label>Bezugspunkt
+      <select id="preciseDrainCorner">
+        <option value="tl">links / oben</option>
+        <option value="tr">rechts / oben</option>
+        <option value="bl">links / unten</option>
+        <option value="br">rechts / unten</option>
+      </select>
+    </label>
+    <label>Abstand waagerecht (m)<input id="preciseDrainX" type="number" min="0" step="0.01" placeholder="z.B. 3,25"></label>
+    <label>Abstand senkrecht (m)<input id="preciseDrainY" type="number" min="0" step="0.01" placeholder="z.B. 4,80"></label>
+  </div>
+  <button type="button" id="setPreciseDrainBtn" class="btn" style="margin-top:8px">Gully nach Maß einsetzen</button>
+  <div class="drainHint">Die Position wird aus dem gezeichneten Dach und den eingegebenen Kantenmaßen skaliert. Für Gefälledämmung bleibt der Punkt damit reproduzierbar bemaßt.</div>
+</div>
+<div class="drainHint">Die Anzahl kann vorgegeben werden. Mit „Entwässerungspunkt“ setzt du die Punkte anschließend direkt in die Dachfläche. Typ auswählen, dann auf die gewünschte Stelle in der Skizze tippen.</div>
 </div>
 </div>
       <div class="flatTools">
@@ -3824,6 +3874,49 @@ function flatSvgPoint(evt){
   return {x:p.x,y:p.y};
 }
 
+
+function flatMetersPerSvgUnit(){
+  if(!flatClosed || flatPoints.length<2)return null;
+  const vals=[];
+  document.querySelectorAll('.edgeInput').forEach(inp=>{
+    const i=Number(inp.dataset.edge);
+    const m=parseFloat(String(inp.value||'').replace(',','.'));
+    if(!Number.isFinite(m)||m<=0||i<0||i>=flatPoints.length)return;
+    const a=flatPoints[i], b=flatPoints[(i+1)%flatPoints.length];
+    const px=Math.hypot(b[0]-a[0],b[1]-a[1]);
+    if(px>0) vals.push(m/px);
+  });
+  if(!vals.length)return null;
+  vals.sort((a,b)=>a-b);
+  return vals[Math.floor(vals.length/2)];
+}
+
+function flatBounds(){
+  if(!flatPoints.length)return null;
+  const xs=flatPoints.map(p=>p[0]), ys=flatPoints.map(p=>p[1]);
+  return {minX:Math.min(...xs),maxX:Math.max(...xs),minY:Math.min(...ys),maxY:Math.max(...ys)};
+}
+
+function setPreciseDrain(){
+  const type=document.getElementById('preciseDrainType')?.value||'roof';
+  const corner=document.getElementById('preciseDrainCorner')?.value||'tl';
+  const mx=parseFloat(String(document.getElementById('preciseDrainX')?.value||'').replace(',','.'));
+  const my=parseFloat(String(document.getElementById('preciseDrainY')?.value||'').replace(',','.'));
+  if(!Number.isFinite(mx)||!Number.isFinite(my)||mx<0||my<0){
+    alert('Bitte beide Abstände in Metern eingeben.'); return;
+  }
+  const scale=flatMetersPerSvgUnit(), b=flatBounds();
+  if(!scale||!b){alert('Bitte zuerst den Grundriss schließen und mindestens ein echtes Kantenmaß eingeben.');return;}
+  const dx=mx/scale, dy=my/scale;
+  const x=corner.includes('r') ? b.maxX-dx : b.minX+dx;
+  const y=corner.startsWith('b') ? b.maxY-dy : b.minY+dy;
+  if(x<b.minX||x>b.maxX||y<b.minY||y>b.maxY){
+    alert('Die eingegebenen Abstände liegen außerhalb der gezeichneten Dachfläche.'); return;
+  }
+  flatDrains.push({type,x,y,measureX:mx,measureY:my,corner});
+  updateDrainCounters(); renderFlatDrains();
+}
+
 function drainTypeLabel(t){
   return t==='roof'?'FG':(t==='attika'?'AG':'NE');
 }
@@ -3842,7 +3935,7 @@ function renderFlatDrains(){
     c.setAttribute('fill',d.type==='emergency'?'#f59e0b':(d.type==='attika'?'#2563eb':'#06b6d4'));
     const t=document.createElementNS(ns,'text');
     t.setAttribute('x',d.x+13); t.setAttribute('y',d.y+4);
-    t.textContent=drainTypeLabel(d.type)+(i+1);
+    t.textContent=drainTypeLabel(d.type)+(i+1)+(Number.isFinite(d.measureX)?` · ${d.measureX.toFixed(2)}/${d.measureY.toFixed(2)} m`:'');
     g.appendChild(c); g.appendChild(t);
     g.addEventListener('click',ev=>{
       ev.stopPropagation();
@@ -4480,11 +4573,32 @@ renderRecentProjects();
   const flatFullBtn=document.getElementById('flatFullBtn');
   if(flatFullBtn)flatFullBtn.addEventListener('click',async()=>{
     const box=document.getElementById('flatFullscreen');
-    try{
-      if(!document.fullscreenElement) await box.requestFullscreen();
-      else await document.exitFullscreen();
-    }catch(e){ alert('Vollbild konnte auf diesem Gerät nicht geöffnet werden.'); }
+    const entering=!document.fullscreenElement && !box.classList.contains('flatFsFallback');
+    if(entering){
+      let nativeOk=false;
+      try{
+        if(box.requestFullscreen){ await box.requestFullscreen(); nativeOk=true; }
+      }catch(e){}
+      if(!nativeOk)box.classList.add('flatFsFallback');
+      try{ if(screen.orientation?.lock) await screen.orientation.lock('landscape'); }catch(e){}
+      flatFullBtn.textContent='✕ Vollbild schließen';
+    }else{
+      try{ if(document.fullscreenElement) await document.exitFullscreen(); }catch(e){}
+      box.classList.remove('flatFsFallback');
+      try{ if(screen.orientation?.unlock) screen.orientation.unlock(); }catch(e){}
+      flatFullBtn.textContent='⛶ Skizze Vollbild';
+    }
   });
+
+  document.addEventListener('fullscreenchange',()=>{
+    const box=document.getElementById('flatFullscreen');
+    if(!document.fullscreenElement && !box.classList.contains('flatFsFallback')){
+      if(flatFullBtn)flatFullBtn.textContent='⛶ Skizze Vollbild';
+    }
+  });
+
+  const preciseDrainBtn=document.getElementById('setPreciseDrainBtn');
+  if(preciseDrainBtn)preciseDrainBtn.addEventListener('click',setPreciseDrain);
 
   const addDrainBtn=document.getElementById('addDrainBtn');
   if(addDrainBtn)addDrainBtn.addEventListener('click',()=>{
