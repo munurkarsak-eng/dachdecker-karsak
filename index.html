@@ -52,7 +52,7 @@ input,select{width:100%;padding:13px;border:2px solid #d5dae0;border-radius:11px
 .flatTools button{padding:11px;border:2px solid #d1d5db;background:#fff;border-radius:11px;font-weight:800}
 .flatTools button.primary{background:#20262e;color:#fff;border-color:#20262e}
 .flatCanvas{width:100%;background:#fff;border:2px solid #cfd5dc;border-radius:14px;touch-action:none}
-/* V70: Aufmaß-Skizze auf Smartphones wirklich fast über die komplette Displaybreite */
+/* V71: Aufmaß-Skizze auf Smartphones wirklich fast über die komplette Displaybreite */
 .flatCanvas{display:block;box-sizing:border-box}
 @media(max-width:700px){
   .flatCanvas{
@@ -3509,7 +3509,7 @@ function openFlatForm(kind){
 </div>
 
 <div class="flatControls" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-  <button type="button" id="flatFullBtn" class="btn">⛶ Skizze Vollbild · V70</button>
+  <button type="button" id="flatFullBtn" class="btn">⛶ Skizze Vollbild · V71</button>
   <button type="button" id="addDrainBtn" class="btn">＋ Entwässerungspunkt</button>
   <button type="button" id="openPreciseDrainBtn" class="btn">📐 Gully genau bemaßen</button>
 </div>
@@ -4073,7 +4073,7 @@ function ensureSketchOverlay(){
     ov.innerHTML=`
       <svg id="sketchOverlaySvg" viewBox="0 0 500 420" preserveAspectRatio="xMidYMid meet" style="position:absolute;inset:0;width:100%;height:100%;touch-action:none;background:#fff"></svg>
       <div id="sketchOverlayTools" style="position:absolute;top:8px;right:8px;display:flex;flex-direction:column;gap:6px;z-index:5;width:145px">
-        <div style="background:#111827;color:#fff;border-radius:9px;padding:7px;text-align:center;font-weight:900">AUFMASS V70</div>
+        <div style="background:#111827;color:#fff;border-radius:9px;padding:7px;text-align:center;font-weight:900">AUFMASS V71</div>
         <button type="button" id="ovUndo">↶ Rückgängig</button>
         <button type="button" id="ovDelete">⌫ Letzten Punkt</button>
         <button type="button" id="ovDrain">＋ Gully</button>
@@ -4766,26 +4766,44 @@ if('serviceWorker' in navigator){
 
 renderRecentProjects();
 
-  const flatFullBtn=document.getElementById('flatFullBtn');
-  if(flatFullBtn)flatFullBtn.addEventListener('click',(e)=>{
-    e.preventDefault(); e.stopPropagation();
-    setupOverlayZoom();
-    openSketchOverlay();
+  // V71: Aufmaß-Bedienelemente werden erst später dynamisch erzeugt.
+  // Deshalb Event-Delegation am document statt einmaliger getElementById-Bindung beim Laden.
+  document.addEventListener('click',(e)=>{
+    const btn=e.target.closest && e.target.closest('button');
+    if(!btn)return;
+
+    if(btn.id==='flatFullBtn'){
+      e.preventDefault(); e.stopPropagation();
+      openSketchOverlay();
+      return;
+    }
+
+    if(btn.id==='openPreciseDrainBtn'){
+      e.preventDefault(); e.stopPropagation();
+      const modal=document.getElementById('preciseDrainModal');
+      if(modal)modal.style.display='flex';
+      return;
+    }
+
+    if(btn.id==='setPreciseDrainBtn'){
+      e.preventDefault(); e.stopPropagation();
+      setPreciseDrain();
+      return;
+    }
+
+    if(btn.id==='addDrainBtn'){
+      e.preventDefault(); e.stopPropagation();
+      const choice=prompt('Entwässerung wählen:\\n1 = Flächengully\\n2 = Attikagully\\n3 = Notentwässerung');
+      pendingDrainType=choice==='1'?'roof':(choice==='2'?'attika':(choice==='3'?'emergency':null));
+      if(pendingDrainType)alert('Jetzt die Position direkt in der Skizze antippen.');
+      return;
+    }
   });
 
-  const preciseDrainBtn=document.getElementById('setPreciseDrainBtn');
-  if(preciseDrainBtn)preciseDrainBtn.addEventListener('click',setPreciseDrain);
-
-  const addDrainBtn=document.getElementById('addDrainBtn');
-  if(addDrainBtn)addDrainBtn.addEventListener('click',()=>{
-    const choice=prompt('Entwässerung wählen:\\n1 = Flächengully\\n2 = Attikagully\\n3 = Notentwässerung');
-    pendingDrainType=choice==='1'?'roof':(choice==='2'?'attika':(choice==='3'?'emergency':null));
-    if(pendingDrainType)alert('Jetzt die Position direkt in der Skizze antippen.');
-  });
-
-  const flatSvg=document.getElementById('flatCanvas');
-  if(flatSvg)flatSvg.addEventListener('click',evt=>{
-    if(!pendingDrainType)return;
+  // Auch das SVG wird dynamisch erzeugt; deshalb ebenfalls delegiert.
+  document.addEventListener('click',(evt)=>{
+    const flatSvg=evt.target.closest && evt.target.closest('#flatCanvas');
+    if(!flatSvg || !pendingDrainType)return;
     evt.preventDefault(); evt.stopPropagation();
     const p=flatSvgPoint(evt);
     flatDrains.push({type:pendingDrainType,x:p.x,y:p.y});
@@ -4796,12 +4814,6 @@ renderRecentProjects();
 
 
   setupFlatZoom();
-
-  const openPreciseDrainBtn=document.getElementById('openPreciseDrainBtn');
-  const preciseDrainModal=document.getElementById('preciseDrainModal');
-  if(openPreciseDrainBtn)openPreciseDrainBtn.addEventListener('click',()=>{
-    preciseDrainModal.style.display='flex';
-  });
   document.getElementById('modalDrainCancel')?.addEventListener('click',()=>{
     preciseDrainModal.style.display='none';
   });
